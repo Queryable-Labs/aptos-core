@@ -8,6 +8,36 @@ locals {
   workspace_name = var.workspace_name_override != "" ? var.workspace_name_override : terraform.workspace
   aws_tags       = "Terraform=testnet,Workspace=${local.workspace_name}"
   chain_name     = var.chain_name != "" ? var.chain_name : "${local.workspace_name}net"
+
+  s3_genesis_initcontainer = {
+    name   = "genesis-initcontainer"
+    image   = "amazon/aws-cli:2.8.10@sha256:643ce759130f2a6b965419fc7866f953bc400fe1153d881d9232f351b37dad44"
+    command = ["sh", "-c", "aws s3 cp s3://${aws_s3_bucket.genesis.id}/e${var.era}-genesis.blob /opt/aptos/genesis/genesis.blob && aws s3 cp s3://${aws_s3_bucket.genesis.id}/e${var.era}-waypoint.txt /opt/aptos/genesis/waypoint.txt"]
+    volumeMounts = [
+      {
+        name      = "genesis-data"
+        mountPath = "/opt/aptos/genesis"
+      }
+    ]
+  }
+
+      # - name: initcontainer
+      # image: alpine:latest
+      # command: ["/bin/sh", "-c"]
+      # args:
+      #   - curl http://api-service.local/db/starting;
+
+  # to get the genesis in initcontainer step from s3
+  helm_values_list = [
+    {
+      "validator" = {
+        extraInitContainers = [local.s3_genesis_initcontainer]
+      }
+      "fullnode" = {
+        extraInitContainers = [local.s3_genesis_initcontainer]
+      }
+    }
+  ]
 }
 
 # Forge testing overrides
@@ -53,6 +83,7 @@ module "validator" {
   num_validators      = var.num_validators
   num_fullnode_groups = var.num_fullnode_groups
   helm_values         = var.aptos_node_helm_values
+  helm_values_list = local.helm_values_list
 
   # allow all nodegroups to surge to 2x their size by default, in case of total nodes replacement
   validator_instance_num     = var.num_validator_instance > 0 ? 2 * var.num_validator_instance : var.num_validators
@@ -109,6 +140,7 @@ resource "helm_release" "genesis" {
       }
       imageTag = var.image_tag
       genesis = {
+        s3Bucket        = aws_s3_bucket.genesis.id
         numValidators   = var.num_validators
         username_prefix = local.aptos_node_helm_prefix
         domain          = local.domain
@@ -119,6 +151,11 @@ resource "helm_release" "genesis" {
           # only enable onchain discovery if var.zone_id has been provided to provision
           # internet facing network addresses for the fullnodes
           enable_onchain_discovery = var.zone_id != ""
+        }
+      }
+      serviceAccount = {
+        annotations = {
+          "eks.amazonaws.com/role-arn" = aws_iam_role.genesis.arn
         }
       }
     }),
