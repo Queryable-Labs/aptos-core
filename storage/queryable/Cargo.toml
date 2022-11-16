@@ -1,0 +1,22 @@
+[package]
+name = "aptos-queryable"
+version = "0.1.0"
+authors = ["Queryable Labs <opensource@queryable.com>"]
+description = "Aptos Queryable integration"
+repository = "https://github.com/queryable/aptos-core"
+homepage = "https://queryable.com"
+license = "Apache-2.0"
+publish = false
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0.57"
+serde = { version = "1.0.137", default-features = false }
+serde_json = "1.0.81"
+aptos-types = { path = "../../types" }
+aptos-logger = { path = "../../crates/aptos-logger" }
+aptos-crypto = { path = "../../crates/aptos-crypto" }
+aptos-vm = { path = "../../aptos-move/aptos-vm" }
+storage-interface = { path = "../../storage/storage-interface" }
+move-deps = { path = "../../aptos-move/move-deps" }
+queryable-core = { git = "https://github.com/Queryable-Labs/queryable-core.git", rev = "a4328fc024f4ce1eb76c8a18855b3b37b5c7e638" }

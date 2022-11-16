@@ -92,6 +92,8 @@ pub struct StorageConfig {
     /// since genesis. To recover operation after data loss, or to bootstrap a node in fast sync
     /// mode, the indexer db needs to be copied in from another node.
     pub enable_indexer: bool,
+    /// Path to Queryable config
+    pub decentralized_datasource_config_path: PathBuf,
 }
 
 pub const NO_OP_STORAGE_PRUNER_CONFIG: PrunerConfig = PrunerConfig {
@@ -241,6 +243,7 @@ impl Default for StorageConfig {
             enable_indexer: false,
             buffered_state_target_items: BUFFERED_STATE_TARGET_ITEMS,
             max_num_nodes_per_lru_cache_shard: DEFAULT_MAX_NUM_NODES_PER_LRU_CACHE_SHARD,
+            decentralized_datasource_config_path: PathBuf::from("/opt/decentralized-data/config.yml")
         }
     }
 }

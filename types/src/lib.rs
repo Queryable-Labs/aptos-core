@@ -3,6 +3,8 @@
 
 #![forbid(unsafe_code)]
 
+pub use move_core_types;
+
 pub mod access_path;
 pub mod account_address;
 pub mod account_config;

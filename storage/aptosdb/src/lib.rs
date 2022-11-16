@@ -27,6 +27,7 @@ mod pruner;
 mod state_merkle_db;
 mod state_store;
 mod transaction_store;
+mod call_trace_store;
 mod utils;
 mod versioned_node_cache;
 
@@ -52,6 +53,7 @@ use crate::{
     schema::*,
     state_store::StateStore,
     transaction_store::TransactionStore,
+    call_trace_store::CallTraceStore,
 };
 use anyhow::{bail, ensure, Result};
 #[cfg(any(test, feature = "fuzzing"))]
@@ -94,10 +96,12 @@ use aptos_types::{
 };
 use aptos_vm::data_cache::AsMoveResolver;
 use aptosdb_indexer::Indexer;
+use aptos_queryable::export::QueryableExporter;
 use itertools::zip_eq;
 use move_resource_viewer::MoveValueAnnotator;
 use once_cell::sync::Lazy;
 use schemadb::{SchemaBatch, DB};
+use std::cmp::min;
 use std::{
     collections::HashMap,
     iter::Iterator,
@@ -107,6 +111,10 @@ use std::{
     thread::JoinHandle,
     time::{Duration, Instant},
 };
+use std::path::PathBuf;
+use std::sync::RwLock;
+use aptos_types::chain_id::ChainId;
+use aptos_types::write_set::WriteSet;
 
 use crate::pruner::{
     ledger_pruner_manager::LedgerPrunerManager, ledger_store::ledger_store_pruner::LedgerPruner,
@@ -252,10 +260,12 @@ pub struct AptosDB {
     ledger_store: Arc<LedgerStore>,
     state_store: Arc<StateStore>,
     transaction_store: Arc<TransactionStore>,
+    call_trace_store: Arc<CallTraceStore>,
     ledger_pruner: LedgerPrunerManager,
     _rocksdb_property_reporter: RocksdbPropertyReporter,
     ledger_commit_lock: std::sync::Mutex<()>,
     indexer: Option<Indexer>,
+    queryable_exporter: Arc<Option<RwLock<QueryableExporter>>>,
 }
 
 impl AptosDB {
@@ -266,6 +276,7 @@ impl AptosDB {
         buffered_state_target_items: usize,
         max_nodes_per_lru_cache_shard: usize,
         hack_for_tests: bool,
+        queryable_exporter: Option<QueryableExporter>,
     ) -> Self {
         let arc_ledger_rocksdb = Arc::new(ledger_rocksdb);
         let arc_state_merkle_rocksdb = Arc::new(state_merkle_rocksdb);
@@ -299,6 +310,7 @@ impl AptosDB {
             ledger_store: Arc::new(LedgerStore::new(Arc::clone(&arc_ledger_rocksdb))),
             state_store,
             transaction_store: Arc::new(TransactionStore::new(Arc::clone(&arc_ledger_rocksdb))),
+            call_trace_store: Arc::new(CallTraceStore::new(Arc::clone(&arc_ledger_rocksdb))),
             ledger_pruner,
             _rocksdb_property_reporter: RocksdbPropertyReporter::new(
                 Arc::clone(&arc_ledger_rocksdb),
@@ -306,6 +318,11 @@ impl AptosDB {
             ),
             ledger_commit_lock: std::sync::Mutex::new(()),
             indexer: None,
+            queryable_exporter: if queryable_exporter.is_some() {
+                Arc::new(Some(RwLock::new(queryable_exporter.unwrap())))
+            } else {
+                Arc::new(None)
+            }
         }
     }
 
@@ -317,6 +334,7 @@ impl AptosDB {
         enable_indexer: bool,
         buffered_state_target_items: usize,
         max_num_nodes_per_lru_cache_shard: usize,
+        decentralized_datasource_config_path: Option<PathBuf>,
     ) -> Result<Self> {
         ensure!(
             pruner_config.eq(&NO_OP_STORAGE_PRUNER_CONFIG) || !readonly,
@@ -327,7 +345,7 @@ impl AptosDB {
         let state_merkle_db_path = db_root_path.as_ref().join(STATE_MERKLE_DB_NAME);
         let instant = Instant::now();
 
-        let (ledger_db, state_merkle_db) = if readonly {
+        let (ledger_db, state_merkle_db, queryable_exporter) = if readonly {
             (
                 DB::open_cf_readonly(
                     &gen_rocksdb_options(&rocksdb_configs.ledger_db_config, true),
@@ -341,6 +359,7 @@ impl AptosDB {
                     STATE_MERKLE_DB_NAME,
                     state_merkle_db_column_families(),
                 )?,
+                None,
             )
         } else {
             (
@@ -356,6 +375,16 @@ impl AptosDB {
                     STATE_MERKLE_DB_NAME,
                     gen_state_merkle_cfds(&rocksdb_configs.state_merkle_db_config),
                 )?,
+                if let Some(config_path) = decentralized_datasource_config_path {
+                    Some(
+                        QueryableExporter::new(
+                            config_path,
+                            None,
+                        )?
+                    )
+                } else {
+                    None
+                }
             )
         };
 
@@ -366,6 +395,7 @@ impl AptosDB {
             buffered_state_target_items,
             max_num_nodes_per_lru_cache_shard,
             readonly,
+            queryable_exporter,
         );
 
         if !readonly && enable_indexer {
@@ -428,6 +458,7 @@ impl AptosDB {
         db_root_path: P,
         secondary_db_root_path: P,
         mut rocksdb_configs: RocksdbConfigs,
+        decentralized_datasource_config_path: Option<PathBuf>,
     ) -> Result<Self> {
         let ledger_db_primary_path = db_root_path.as_ref().join(LEDGER_DB_NAME);
         let ledger_db_secondary_path = secondary_db_root_path.as_ref().join(LEDGER_DB_NAME);
@@ -459,6 +490,16 @@ impl AptosDB {
             BUFFERED_STATE_TARGET_ITEMS,
             0,
             true,
+            if let Some(config_path) = decentralized_datasource_config_path {
+                Some(
+                    QueryableExporter::new(
+                        config_path,
+                        None,
+                    )?
+                )
+            } else {
+                None
+            },
         ))
     }
 
@@ -786,7 +827,9 @@ impl AptosDB {
                     self.transaction_store
                         .put_transaction(ver, txn_to_commit.transaction(), cs)?;
                     self.transaction_store
-                        .put_write_set(ver, txn_to_commit.write_set(), cs)
+                        .put_write_set(ver, txn_to_commit.write_set(), cs)?;
+                    self.call_trace_store
+                        .put_call_trace(ver, txn_to_commit.call_traces(), cs)
                 },
             )?;
             // Transaction accumulator updates. Get result root hash.
@@ -856,6 +899,170 @@ impl AptosDB {
                 min_readable_epoch_snapshot_version,
             )
         }
+    }
+
+    pub fn set_chain_id(&self, chain_id: ChainId) -> Result<(), anyhow::Error> {
+        if let Some(exporter) = self.queryable_exporter.as_ref() {
+            let mut exporter = exporter.write().unwrap();
+
+            exporter.set_chain_id(chain_id);
+        }
+
+        Ok(())
+    }
+
+    pub fn export_txns_to_commit(
+        &self,
+        last_version: Version,
+        ledger_current_version: Version,
+        mut batch: Option<&mut SchemaBatch>,
+    ) -> Result<()> {
+        if let Some(exporter) = self.queryable_exporter.as_ref() {
+            let mut exporter = exporter.write().unwrap();
+
+            let mut first_version = exporter.last_tx_version();
+
+            info!(
+                "Queryable export initiated for versions since {} till {}",
+                first_version,
+                last_version,
+            );
+
+            if first_version >= last_version {
+                info!("Queryable export skipped, last exported version is older than last_version");
+                return Ok(());
+            }
+
+            let transactions_count = last_version.checked_sub(first_version);
+
+            if transactions_count.is_some() {
+                let state_view = DbStateView {
+                    db: self.state_store.clone(),
+                    version: Some(ledger_current_version),
+                };
+                let resolver = state_view.as_move_resolver();
+                let annotator = MoveValueAnnotator::new(&resolver);
+
+                let mut transactions_count = transactions_count.unwrap();
+
+                let mut i = 0;
+
+                while transactions_count > 0 {
+                    let max_transactions_to_request = min(transactions_count, 5000);
+
+                    info!(
+                        "Fetching transactions since version {}, requests count {}, iteration {}",
+                        first_version,
+                        max_transactions_to_request,
+                        i
+                    );
+
+                    i += 1;
+
+                    let mut transactions_list = self.get_transactions(
+                        first_version.clone(),
+                        max_transactions_to_request,
+                        ledger_current_version,
+                        true
+                    ).unwrap();
+
+                    let events = transactions_list.events.as_mut().unwrap();
+
+                    let mut call_traces = self.call_trace_store.get_call_traces(
+                        first_version.clone(),
+                        max_transactions_to_request,
+                        ledger_current_version,
+                    ).unwrap();
+
+                    let transactions_len = transactions_list.transactions.len();
+
+                    for tx_id in 0..transactions_len {
+                        let transaction = transactions_list.transactions.remove(0);
+                        let transaction_info = transactions_list.proof.transaction_infos.remove(0);
+                        // @TODO: fetch write set
+                        let write_set = WriteSet::default();
+
+                        let events = events.remove(0);
+                        let call_traces = call_traces.remove(0);
+
+                        match transaction.clone() {
+                            Transaction::BlockMetadata(block_metadata) => {
+                                trace!("BLOCK tx {}, total count {}", first_version + tx_id as u64, exporter.get_cached_blocks_count());
+
+                                exporter.complete_block()?;
+
+                                if exporter.get_cached_blocks_count() >= exporter.get_blocks_per_export() {
+                                    let result = exporter.export();
+
+                                    match result {
+                                        Err(err) => {
+                                            error!("Failed to export, error: {}", err);
+
+                                            let result = exporter.reset_cached_data();
+
+                                            if result.is_err() {
+                                                panic!("Failed to recover from add_transaction error")
+                                            }
+
+                                            return Ok(());
+                                        },
+                                        _ => {}
+                                    }
+
+                                    if batch.is_some() {
+                                        self.call_trace_store.prune_call_traces(
+                                            0,
+                                            first_version.clone() + (tx_id as u64) -1,
+                                            batch.as_mut().unwrap()
+                                        )?;
+                                    }
+                                }
+
+                                trace!("Calling add_current_block {}", first_version + tx_id as u64);
+
+                                exporter.add_current_block(block_metadata.clone(), first_version + tx_id as u64)?;
+                            },
+                            _ => {
+                                trace!("Skipping, Non block tx {}", first_version + tx_id as u64);
+                            }
+                        }
+
+                        let result = exporter.add_transaction(
+                            &annotator,
+                            first_version.clone() + (tx_id as u64),
+                            &transaction,
+                            &transaction_info,
+                            &write_set,
+                            &events,
+                            &call_traces,
+                        );
+
+                        match result {
+                            Err(err) => {
+                                error!("Failed to add transaction, error: {}", err);
+
+                                let result = exporter.reset_cached_data();
+
+                                if result.is_err() {
+                                    panic!("Failed to recover from add_transaction error")
+                                }
+
+                                return Ok(());
+                            },
+                            _ => {
+
+                            }
+                        }
+                    }
+
+                    first_version += transactions_len as u64;
+
+                    transactions_count -= transactions_len as u64;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1109,6 +1316,7 @@ impl DbReader for AptosDB {
                         events,
                         txn_info.gas_used(),
                         txn_info.status().clone().into(),
+                        vec![],
                     );
                     Ok((txn_info, (txn, txn_output)))
                 })
@@ -1542,6 +1750,15 @@ impl DbWriter for AptosDB {
                latest_in_memory_state.current_version.expect("Must exist")
             );
 
+            for tx_id in 0..txns_to_commit.len() {
+                let txn_to_commit = &txns_to_commit[tx_id];
+                self.call_trace_store.put_call_trace(
+                    first_version.clone() + tx_id.clone() as u64,
+                    txn_to_commit.call_traces(),
+                    &mut batch
+                )?;
+            }
+
             // Persist.
             {
                 let _timer = OTHER_TIMERS_SECONDS
@@ -1603,6 +1820,12 @@ impl DbWriter for AptosDB {
                 // state snapshots are persisted in their async thread.
                 self.ledger_pruner
                     .maybe_set_pruner_target_db_version(last_version);
+
+                self.export_txns_to_commit(
+                    last_version,
+                    last_version,
+                    None,
+                )?;
             }
 
             // Note: this must happen after txns have been saved to db because types can be newly

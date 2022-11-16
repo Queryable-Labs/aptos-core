@@ -24,6 +24,7 @@ use aptos_types::{
     },
     write_set::WriteSet,
 };
+use aptos_types::move_core_types::trace::CallTrace;
 pub use error::Error;
 pub use executed_chunk::ExecutedChunk;
 pub use parsed_transaction_output::ParsedTransactionOutput;
@@ -317,6 +318,9 @@ pub struct TransactionData {
     /// List of reconfiguration events emitted during this transaction.
     reconfig_events: Vec<ContractEvent>,
 
+    /// List of call traces generated during transaction execution
+    call_traces: Vec<CallTrace>,
+
     /// The execution status set by the VM.
     status: TransactionStatus,
 
@@ -339,6 +343,7 @@ impl TransactionData {
         write_set: WriteSet,
         events: Vec<ContractEvent>,
         reconfig_events: Vec<ContractEvent>,
+        call_traces: Vec<CallTrace>,
         status: TransactionStatus,
         event_tree: Arc<InMemoryAccumulator<EventAccumulatorHasher>>,
         gas_used: u64,
@@ -350,6 +355,7 @@ impl TransactionData {
             write_set,
             events,
             reconfig_events,
+            call_traces,
             status,
             event_tree,
             gas_used,
@@ -368,6 +374,10 @@ impl TransactionData {
 
     pub fn events(&self) -> &[ContractEvent] {
         &self.events
+    }
+
+    pub fn call_traces(&self) -> &Vec<CallTrace> {
+        &self.call_traces
     }
 
     pub fn status(&self) -> &TransactionStatus {

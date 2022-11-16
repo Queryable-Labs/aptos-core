@@ -30,6 +30,7 @@ pub(super) fn ledger_db_column_families() -> Vec<ColumnFamilyName> {
         VERSION_DATA_CF_NAME,
         WRITE_SET_CF_NAME,
         DB_METADATA_CF_NAME,
+        CALL_TRACES_BY_VERSION_CF_NAME,
     ]
 }
 

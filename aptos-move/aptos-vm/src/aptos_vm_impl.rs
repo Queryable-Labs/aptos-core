@@ -31,6 +31,8 @@ use aptos_types::{
 use dashmap::DashMap;
 use fail::fail_point;
 use framework::{RuntimeModuleMetadata, APTOS_METADATA_KEY};
+use move_core_types::trace::CallTrace;
+use move_vm_runtime::session::SerializedReturnValues;
 use move_binary_format::{errors::VMResult, CompiledModule};
 use move_core_types::{
     language_storage::ModuleId,
@@ -587,6 +589,7 @@ pub(crate) fn get_transaction_output<A: AccessPathCache, S: MoveResolverExt>(
     txn_data: &TransactionMetadata,
     status: ExecutionStatus,
     gas_feature_version: u64,
+    result: Option<SerializedReturnValues>,
 ) -> Result<TransactionOutputExt, VMStatus> {
     let gas_used = txn_data
         .max_gas_amount()
@@ -598,11 +601,20 @@ pub(crate) fn get_transaction_output<A: AccessPathCache, S: MoveResolverExt>(
     let (delta_change_set, change_set) = change_set_ext.into_inner();
     let (write_set, events) = change_set.into_inner();
 
+    let call_traces: Vec<CallTrace>;
+
+    if result.is_some() {
+        call_traces = result.unwrap().call_traces;
+    } else {
+        call_traces = vec![];
+    }
+
     let txn_output = TransactionOutput::new(
         write_set,
         events,
         gas_used.into(),
         TransactionStatus::Keep(status),
+        call_traces,
     );
 
     Ok(TransactionOutputExt::new(delta_change_set, txn_output))

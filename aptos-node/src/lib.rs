@@ -592,6 +592,7 @@ pub fn setup_environment(
             node_config.storage.enable_indexer,
             node_config.storage.buffered_state_target_items,
             node_config.storage.max_num_nodes_per_lru_cache_shard,
+            Some(node_config.storage.decentralized_datasource_config_path.clone()),
         )
         .map_err(|err| anyhow!("DB failed to open {}", err))?,
     );
@@ -627,6 +628,10 @@ pub fn setup_environment(
         "Storage service started in {} ms",
         instant.elapsed().as_millis()
     );
+
+    let chain_id = fetch_chain_id(&db_rw)?;
+
+    aptos_db.set_chain_id(chain_id)?;
 
     let mut network_runtimes = vec![];
     let mut mempool_network_handles = vec![];

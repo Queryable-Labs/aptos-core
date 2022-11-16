@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::in_memory_state_calculator::NEW_EPOCH_EVENT_KEY;
+use aptos_types::move_core_types::trace::CallTrace;
 use aptos_types::{
     contract_event::ContractEvent,
     transaction::{TransactionOutput, TransactionStatus},
@@ -50,13 +51,14 @@ impl ParsedTransactionOutput {
         Vec<ContractEvent>,
         u64,
         TransactionStatus,
+        Vec<CallTrace>,
     ) {
         let Self {
             output,
             reconfig_events,
         } = self;
-        let (write_set, events, gas_used, status) = output.unpack();
+        let (write_set, events, gas_used, status, call_traces) = output.unpack();
 
-        (write_set, events, reconfig_events, gas_used, status)
+        (write_set, events, reconfig_events, gas_used, status, call_traces)
     }
 }

@@ -23,6 +23,7 @@ pub(crate) mod transaction_accumulator;
 pub(crate) mod transaction_by_account;
 pub(crate) mod transaction_by_hash;
 pub(crate) mod transaction_info;
+pub(crate) mod call_traces_by_version;
 pub(crate) mod version_data;
 pub(crate) mod write_set;
 
@@ -48,6 +49,7 @@ pub const TRANSACTION_BY_HASH_CF_NAME: ColumnFamilyName = "transaction_by_hash";
 pub const TRANSACTION_INFO_CF_NAME: ColumnFamilyName = "transaction_info";
 pub const VERSION_DATA_CF_NAME: ColumnFamilyName = "version_data";
 pub const WRITE_SET_CF_NAME: ColumnFamilyName = "write_set";
+pub const CALL_TRACES_BY_VERSION_CF_NAME: ColumnFamilyName = "call_traces_by_version";
 
 fn ensure_slice_len_eq(data: &[u8], len: usize) -> Result<()> {
     ensure!(
@@ -103,6 +105,9 @@ pub mod fuzzing {
             );
             assert_no_panic_decoding::<super::transaction_by_hash::TransactionByHashSchema>(data);
             assert_no_panic_decoding::<super::transaction_info::TransactionInfoSchema>(data);
+            assert_no_panic_decoding::<super::call_traces_by_version::CallTracesByVersionSchema>(
+                data,
+            );
             assert_no_panic_decoding::<super::version_data::VersionDataSchema>(data);
             assert_no_panic_decoding::<super::write_set::WriteSetSchema>(data);
         }

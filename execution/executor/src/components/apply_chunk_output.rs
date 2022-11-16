@@ -153,7 +153,7 @@ impl ApplyChunkOutput {
             itertools::zip_eq(to_keep, state_checkpoint_hashes),
             state_updates_vec,
         ) {
-            let (write_set, events, reconfig_events, gas_used, status) = txn_output.unpack();
+            let (write_set, events, reconfig_events, gas_used, status, call_traces) = txn_output.unpack();
             let event_tree = {
                 let event_hashes: Vec<_> = events.iter().map(CryptoHash::hash).collect();
                 InMemoryAccumulator::<EventAccumulatorHasher>::from_leaves(&event_hashes)
@@ -180,6 +180,7 @@ impl ApplyChunkOutput {
                     write_set,
                     events,
                     reconfig_events,
+                    call_traces,
                     status,
                     Arc::new(event_tree),
                     gas_used,

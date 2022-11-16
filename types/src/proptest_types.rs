@@ -803,6 +803,7 @@ impl TransactionToCommitGen {
             state_updates,
             WriteSetMut::new(write_set).freeze().expect("Cannot fail"),
             events,
+            Vec::new(),
             false, /* event_gen never generates reconfig events */
         )
     }
@@ -1117,6 +1118,7 @@ impl BlockGen {
             ),
             HashMap::new(),
             WriteSet::default(),
+            Vec::new(),
             Vec::new(),
             false,
         ));

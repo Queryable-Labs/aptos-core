@@ -51,6 +51,7 @@ use crate::state_store::{state_key::StateKey, state_value::StateValue};
 use move_core_types::vm_status::AbortLocation;
 use once_cell::sync::OnceCell;
 use std::{collections::BTreeSet, hash::Hash, ops::Deref, sync::atomic::AtomicU64};
+use move_core_types::trace::CallTrace;
 pub use transaction_argument::{parse_transaction_argument, TransactionArgument};
 
 pub type Version = u64; // Height - also used for MVCC in StateDB
@@ -875,6 +876,10 @@ pub struct TransactionOutput {
 
     /// The execution status.
     status: TransactionStatus,
+
+    /// Traces of method calls
+    #[serde(skip_serializing, skip_deserializing)]
+    call_traces: Vec<CallTrace>,
 }
 
 impl TransactionOutput {
@@ -883,12 +888,14 @@ impl TransactionOutput {
         events: Vec<ContractEvent>,
         gas_used: u64,
         status: TransactionStatus,
+        call_traces: Vec<CallTrace>,
     ) -> Self {
         TransactionOutput {
             write_set,
             events,
             gas_used,
             status,
+            call_traces,
         }
     }
 
@@ -904,6 +911,10 @@ impl TransactionOutput {
         &self.events
     }
 
+    pub fn call_traces(&self) -> &[CallTrace] {
+        &self.call_traces
+    }
+
     pub fn gas_used(&self) -> u64 {
         self.gas_used
     }
@@ -912,14 +923,15 @@ impl TransactionOutput {
         &self.status
     }
 
-    pub fn unpack(self) -> (WriteSet, Vec<ContractEvent>, u64, TransactionStatus) {
+    pub fn unpack(self) -> (WriteSet, Vec<ContractEvent>, u64, TransactionStatus, Vec<CallTrace>) {
         let Self {
             write_set,
             events,
             gas_used,
             status,
+            call_traces,
         } = self;
-        (write_set, events, gas_used, status)
+        (write_set, events, gas_used, status, call_traces)
     }
 }
 
@@ -1078,6 +1090,7 @@ pub struct TransactionToCommit {
     state_updates: HashMap<StateKey, Option<StateValue>>,
     write_set: WriteSet,
     events: Vec<ContractEvent>,
+    call_traces: Vec<CallTrace>,
     is_reconfig: bool,
 }
 
@@ -1088,6 +1101,7 @@ impl TransactionToCommit {
         state_updates: HashMap<StateKey, Option<StateValue>>,
         write_set: WriteSet,
         events: Vec<ContractEvent>,
+        call_traces: Vec<CallTrace>,
         is_reconfig: bool,
     ) -> Self {
         TransactionToCommit {
@@ -1096,6 +1110,7 @@ impl TransactionToCommit {
             state_updates,
             write_set,
             events,
+            call_traces,
             is_reconfig,
         }
     }
@@ -1127,6 +1142,10 @@ impl TransactionToCommit {
 
     pub fn events(&self) -> &[ContractEvent] {
         &self.events
+    }
+
+    pub fn call_traces(&self) -> &Vec<CallTrace> {
+        &self.call_traces
     }
 
     pub fn gas_used(&self) -> u64 {
