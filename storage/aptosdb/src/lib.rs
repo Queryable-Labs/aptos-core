@@ -334,7 +334,7 @@ impl AptosDB {
         enable_indexer: bool,
         buffered_state_target_items: usize,
         max_num_nodes_per_lru_cache_shard: usize,
-        decentralized_datasource_config_path: Option<PathBuf>,
+        queryable_config_path: Option<PathBuf>,
     ) -> Result<Self> {
         ensure!(
             pruner_config.eq(&NO_OP_STORAGE_PRUNER_CONFIG) || !readonly,
@@ -375,7 +375,7 @@ impl AptosDB {
                     STATE_MERKLE_DB_NAME,
                     gen_state_merkle_cfds(&rocksdb_configs.state_merkle_db_config),
                 )?,
-                if let Some(config_path) = decentralized_datasource_config_path {
+                if let Some(config_path) = queryable_config_path {
                     Some(
                         QueryableExporter::new(
                             config_path,
@@ -458,7 +458,7 @@ impl AptosDB {
         db_root_path: P,
         secondary_db_root_path: P,
         mut rocksdb_configs: RocksdbConfigs,
-        decentralized_datasource_config_path: Option<PathBuf>,
+        queryable_config_path: Option<PathBuf>,
     ) -> Result<Self> {
         let ledger_db_primary_path = db_root_path.as_ref().join(LEDGER_DB_NAME);
         let ledger_db_secondary_path = secondary_db_root_path.as_ref().join(LEDGER_DB_NAME);
@@ -490,7 +490,7 @@ impl AptosDB {
             BUFFERED_STATE_TARGET_ITEMS,
             0,
             true,
-            if let Some(config_path) = decentralized_datasource_config_path {
+            if let Some(config_path) = queryable_config_path {
                 Some(
                     QueryableExporter::new(
                         config_path,

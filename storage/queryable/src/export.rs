@@ -65,7 +65,6 @@ impl QueryableExporter {
 
         let datasource_writer = DatasourceWriter::new(
             WriterContext::read_from_file(config_file_path)?,
-            String::from("aptos"),
             String::from("Aptos"),
             String::from("Aptos Blockchain Datasource"),
             String::from("https://aptos.dev/img/aptos_word_dark.svg"),

@@ -592,7 +592,7 @@ pub fn setup_environment(
             node_config.storage.enable_indexer,
             node_config.storage.buffered_state_target_items,
             node_config.storage.max_num_nodes_per_lru_cache_shard,
-            Some(node_config.storage.decentralized_datasource_config_path.clone()),
+            Some(node_config.storage.queryable_config_path.clone()),
         )
         .map_err(|err| anyhow!("DB failed to open {}", err))?,
     );
